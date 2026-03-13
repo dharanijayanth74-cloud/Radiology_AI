@@ -90,47 +90,43 @@ def build_densenet(weights_path: str | None = None,
 # ── Inference ─────────────────────────────────────────────────────────────────
 
 @torch.no_grad()
-def run_inference(model: nn.Module,
-                  tensor: torch.Tensor,
-                  top_k: int = 5) -> dict:
-    """
-    Run a forward pass and return pathology probabilities.
-
-    Parameters
-    ----------
-    model  : DenseNet121 built by `build_densenet()`
-    tensor : torch.Tensor  shape (1, 3, 224, 224), ImageNet-normalised
-    top_k  : int  number of top labels to include
-
-    Returns
-    -------
-    dict with keys:
-        'all_probs'  : dict {label: float}  – all 14 probabilities
-        'top_labels' : list[str]            – top-k label names
-        'top_probs'  : list[float]          – corresponding probabilities
-        'top_idx'    : int                  – index of highest-prob class
-    """
+def run_inference(model, tensor, top_k=5):
     device = next(model.parameters()).device
     tensor = tensor.to(device)
 
-    probs = model(tensor).squeeze().cpu().numpy()          # shape (14,)
+# FIX
+    if tensor.shape[1] == 1:
+        tensor = tensor.repeat(1,3,1,1)
 
-    all_probs = {label: float(prob)
-                 for label, prob in zip(CHEXNET_LABELS, probs)}
+    preds = model(tensor)
+    probs = preds[0].cpu().numpy()
 
-    sorted_indices = np.argsort(probs)[::-1]
-    top_k          = min(top_k, NUM_CLASSES)
-    top_idx_list   = sorted_indices[:top_k].tolist()
+    threshold = 0.5
+    abnormalities = [
+        (CHEXNET_LABELS[i], float(probs[i]))
+        for i in range(len(probs))
+        if probs[i] > threshold
+    ]
 
-    top_labels = [CHEXNET_LABELS[i] for i in top_idx_list]
-    top_probs  = [float(probs[i])   for i in top_idx_list]
+    abnormality_score = float(np.max(probs))
+
+    sorted_idx = np.argsort(probs)[::-1]
+
+    top_labels = []
+    top_probs = []
+
+    for i in sorted_idx[:top_k]:
+        top_labels.append(CHEXNET_LABELS[i])
+        top_probs.append(float(probs[i]))
 
     return {
-        "all_probs":  all_probs,
-        "top_labels": top_labels,
-        "top_probs":  top_probs,
-        "top_idx":    int(sorted_indices[0]),   # single best class for Grad-CAM
-    }
+    "abnormal_score": abnormality_score,
+    "abnormalities": abnormalities,
+    "top_labels": top_labels,
+    "top_probs": top_probs,
+    "top_idx": int(sorted_idx[0]),
+}
+
 
 
 def get_target_layer(model: nn.Module) -> nn.Module:

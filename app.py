@@ -41,7 +41,7 @@ gradcam_opacity = st.sidebar.slider("Grad-CAM Opacity", 0.1, 0.9, 0.5, 0.1)
 # ── Cached model loaders ──────────────────────────────────────────────────────
 @st.cache_resource(show_spinner="🔧 Loading DenseNet121 Medical model...")
 def load_cnn():
-    return cnn_analyzer.build_densenet()
+    return cnn_analyzer.build_densenet(weights_path="models/chexnet_weights.pth")
 
 try:
     cnn_model = load_cnn()
@@ -84,8 +84,14 @@ if uploaded_file is not None and models_loaded:
 
         # 3. DenseNet inference
         cnn_results = cnn_analyzer.run_inference(cnn_model, tensor_3ch)
-        top_prediction = cnn_results["top_labels"][0] if cnn_results["top_labels"] else "No Finding"
-        top_prob = cnn_results["top_probs"][0] if cnn_results["top_probs"] else 0.0
+        abnormal_score = cnn_results["abnormal_score"]
+
+        if abnormal_score > 0.7:
+            status = "Significant abnormality"
+        elif abnormal_score > 0.4:
+            status = "Possible deviation"
+        else:
+            status = "Normal"
 
         # 4. Grad-CAM
         target_layer = cnn_analyzer.get_target_layer(cnn_model)
@@ -93,7 +99,7 @@ if uploaded_file is not None and models_loaded:
             cam = heatmap.generate_gradcam(
                 cnn_model, tensor_3ch,
                 target_layer,
-                class_idx=cnn_results["top_idx"],
+                class_idx=None,
             )
         except Exception as e:
             cam = np.zeros((224, 224), dtype=np.float32)
@@ -106,7 +112,15 @@ if uploaded_file is not None and models_loaded:
     st.markdown("---")
     
     col1, col2 = st.columns([1, 1])
-    col1.metric("Leading Finding", top_prediction, f"{top_prob * 100:.1f}% confidence")
+    score = cnn_results["abnormal_score"]
+
+    status = "Normal"
+    if score > 0.7:
+            status = "Significant Abnormality"
+    elif score > 0.4:
+            status = "Possible Pattern Deviation"
+
+    col1.metric("Abnormality Score", f"{score*100:.1f}%", status)
 
     # Composite overlay
     layer_labels = []
@@ -136,16 +150,13 @@ if uploaded_file is not None and models_loaded:
         st.info(symptoms if symptoms else "None reported.")
 
         st.markdown("---")
-        st.subheader("🔍 All Top-5 Predictions")
-        
-        if top_prediction == "No Finding" and top_prob == 0.0:
-            st.success("No significant pathologies detected.")
-        else:
-            for label, prob in zip(cnn_results["top_labels"], cnn_results["top_probs"]):
-                bar_col, label_col = st.columns([3, 1])
-                bar_col.progress(int(prob * 100))
-                label_col.write(f"**{label}**")
-                st.caption(f"{prob * 100:.2f}%")
+        st.subheader("🔍 Model Confidence Distribution")
+
+        for label, prob in zip(cnn_results["top_labels"], cnn_results["top_probs"]):
+            bar_col, label_col = st.columns([3, 1])
+            bar_col.progress(int(prob * 100))
+            label_col.write(f"**{label}**")
+            st.caption(f"{prob * 100:.2f}%")
 else:
     if not models_loaded:
         st.stop()

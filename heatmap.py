@@ -11,27 +11,21 @@ def generate_gradcam(model: nn.Module,
                      tensor: torch.Tensor, 
                      target_layer: nn.Module, 
                      class_idx: int = None) -> np.ndarray:
-    """
-    Computes the Grad-CAM activation map for the given input tensor.
-    
-    Args:
-        model: The CNN model.
-        tensor: The preprocessed input image tensor shape (1, C, H, W).
-        target_layer: The target convolutional layer to extract gradients from.
-        class_idx: Optional target class index. If None, uses the highest scoring class.
-        
-    Returns:
-        A 2D numpy array representing the normalized heatmap in range [0, 1].
-    """
+
     targets = [ClassifierOutputTarget(class_idx)] if class_idx is not None else None
-    
-    # Needs to match pytorch_grad_cam specification, which accepts a list of target layers
+
     with GradCAM(model=model, target_layers=[target_layer]) as cam:
         grayscale_cam = cam(input_tensor=tensor, targets=targets)
-        
-    # extract the first image in the batch
-    return grayscale_cam[0]
 
+    # Extract batch index 0
+    cam = grayscale_cam[0]
+
+    # Normalize heatmap
+    cam = np.maximum(cam, 0)
+    cam = cam / (cam.max() + 1e-8)
+
+    return cam
+    
 def overlay_heatmap(cam: np.ndarray, 
                     original_image, 
                     alpha: float = 0.5, 
